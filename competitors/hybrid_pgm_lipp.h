@@ -58,23 +58,23 @@ public:
         }
     }
 
-    std::string name() const override {
+    std::string name() const {
         return "HybridPGMLIPP";
     }
 
-    std::vector<std::string> variants() const override {
+    std::vector<std::string> variants() const {
         std::vector<std::string> vec;
         vec.push_back(SearchClass::name());
         vec.push_back(std::to_string(pgm_error));
         return vec;
     }
 
-    size_t size() const override {
+    size_t size() const {
         return dp_index_.size() + lipp_index_.size();
     }
 
     bool applicable(bool unique, bool range_query, bool insert, bool multithread,
-                    const std::string& ops_filename) const override {
+                    const std::string& ops_filename) const {
         return !multithread;
     }
 
