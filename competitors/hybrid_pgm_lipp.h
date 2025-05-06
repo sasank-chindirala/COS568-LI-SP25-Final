@@ -8,17 +8,17 @@
 #include <thread>
 #include <mutex>
 
-// Safe asynchronous HybridPGMLIPP with double-buffered flushing
-
 template<class KeyType, class SearchClass, size_t pgm_error>
 class HybridPGMLIPP : public Competitor<KeyType, SearchClass> {
 public:
     HybridPGMLIPP(const std::vector<int>& params)
-        : dp_index_(params), lipp_index_(params), insert_count_(0),
-          flush_threshold_(1000000), flushing_(false) {}
+        : dp_index_(params), lipp_index_(params), params_(params),
+          insert_count_(0), flush_threshold_(1000000), flushing_(false) {}
 
     ~HybridPGMLIPP() {
-        if (flush_thread_.joinable()) flush_thread_.join();
+        if (flush_thread_.joinable()) {
+            flush_thread_.join();
+        }
     }
 
     uint64_t Build(const std::vector<KeyValue<KeyType>>& data, size_t num_threads) {
@@ -45,7 +45,6 @@ public:
         insert_count_++;
 
         if (insert_count_ >= flush_threshold_ && !flushing_) {
-            // Double-buffering: move to flush_buffer_
             flush_buffer_.swap(insert_buffer_);
             insert_count_ = 0;
             flushing_ = true;
@@ -62,10 +61,7 @@ public:
     }
 
     std::vector<std::string> variants() const {
-        std::vector<std::string> vec;
-        vec.push_back(SearchClass::name());
-        vec.push_back(std::to_string(pgm_error));
-        return vec;
+        return { SearchClass::name(), std::to_string(pgm_error) };
     }
 
     size_t size() const {
@@ -79,13 +75,14 @@ public:
 
 private:
     void flush_to_lipp(uint32_t thread_id) {
-        DynamicPGM<KeyType, SearchClass, pgm_error> flush_index(std::vector<int>());
+        // Create a temporary DynamicPGM to reindex flushed keys
+        DynamicPGM<KeyType, SearchClass, pgm_error> flush_index{params_};
         for (const auto& kv : flush_buffer_) {
             flush_index.Insert(kv, thread_id);
         }
         flush_buffer_.clear();
 
-        // Now transfer to LIPP
+        // Insert ordered keys into LIPP
         for (const auto& kv : flush_index.data()) {
             lipp_index_.Insert(kv, thread_id);
         }
@@ -93,11 +90,15 @@ private:
 
     DynamicPGM<KeyType, SearchClass, pgm_error> dp_index_;
     Lipp<KeyType> lipp_index_;
+
     std::vector<KeyValue<KeyType>> insert_buffer_;
     std::vector<KeyValue<KeyType>> flush_buffer_;
+    std::vector<int> params_;  // store params for flush_index
+
     std::thread flush_thread_;
     std::mutex buffer_mutex_;
     std::atomic<bool> flushing_;
+
     size_t insert_count_;
     size_t flush_threshold_;
 };
