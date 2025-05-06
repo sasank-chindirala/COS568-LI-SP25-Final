@@ -8,13 +8,14 @@
 #include <thread>
 #include <mutex>
 
-// Safe asynchronous HybridPGMLIPP with double-buffered flushing
+// True hybrid with adaptive flushing and no state discard
+
 template<class KeyType, class SearchClass, size_t pgm_error>
 class HybridPGMLIPP : public Competitor<KeyType, SearchClass> {
 public:
     HybridPGMLIPP(const std::vector<int>& params)
         : dp_index_(params), lipp_index_(params), insert_count_(0),
-          flush_threshold_(1000000), flushing_(false) {}
+          flush_threshold_(1000000), flushing_(false), total_ops_(0), insert_ops_(0) {}
 
     ~HybridPGMLIPP() {
         if (flush_thread_.joinable()) flush_thread_.join();
@@ -38,12 +39,23 @@ public:
     }
 
     void Insert(const KeyValue<KeyType>& data, uint32_t thread_id) {
-        std::lock_guard<std::mutex> lock(buffer_mutex_);
-        dp_index_.Insert(data, thread_id);
-        insert_buffer_.emplace_back(data);
-        insert_count_++;
+        {
+            std::lock_guard<std::mutex> lock(buffer_mutex_);
+            dp_index_.Insert(data, thread_id);
+            insert_buffer_.emplace_back(data);
+            insert_count_++;
+        }
+
+        insert_ops_++;
+        total_ops_++;
+
+        if (total_ops_ == 100000 && flush_threshold_ == 1000000) {
+            double ratio = static_cast<double>(insert_ops_) / total_ops_;
+            flush_threshold_ = (ratio >= 0.5) ? 1000000 : 100000;  // adaptive tuning
+        }
 
         if (insert_count_ >= flush_threshold_ && !flushing_) {
+            std::lock_guard<std::mutex> lock(buffer_mutex_);
             flush_buffer_.swap(insert_buffer_);
             insert_count_ = 0;
             flushing_ = true;
@@ -63,10 +75,7 @@ public:
     }
 
     std::vector<std::string> variants() const {
-        std::vector<std::string> vec;
-        vec.push_back(SearchClass::name());
-        vec.push_back(std::to_string(pgm_error));
-        return vec;
+        return { SearchClass::name(), std::to_string(pgm_error) };
     }
 
     size_t size() const {
@@ -88,4 +97,6 @@ private:
     std::atomic<bool> flushing_;
     size_t insert_count_;
     size_t flush_threshold_;
+    std::atomic<size_t> total_ops_;
+    std::atomic<size_t> insert_ops_;
 };
